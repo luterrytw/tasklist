@@ -1,0 +1,10 @@
+LIBRARY "tasklist"
+
+EXPORTS
+	tl_create_handler
+	tl_release_handler
+	tl_start_task_loop_thread
+	tl_stop_task_loop_thread
+	tl_add_task
+	tl_iterator_task
+	tl_dump_tasks
