@@ -14,11 +14,13 @@
 #include "log.h"
 
 
-typedef int (*TLIteratorTaskFunc)(TLTask*, void*);
+typedef int (*TLIteratorTaskFunc)(TLTask* task, void* itdata);
 
+#define MAX_DUMP_STR_BUF_LEN	1024
 struct TASK_DUMP_ST {
+	char strBuf[MAX_DUMP_STR_BUF_LEN];
 	int count;
-	TLTaskFunc dumpFunc;
+	TLDumpFunc dumpFunc;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -136,7 +138,7 @@ static TLTask* remove_timeout_task(TaskListHandler* hdl, int64_t timeoutTime)
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
 	while (task) {
-		if (task->timeout <= timeoutTime) { // timeout
+		if (task->abstime <= timeoutTime) { // timeout
 			if (prev) {
 				prev->next = task->next;
 			} else {
@@ -150,7 +152,6 @@ static TLTask* remove_timeout_task(TaskListHandler* hdl, int64_t timeoutTime)
 		task = task->next;
 	}
 	pthread_mutex_unlock(&hdl->listLock);
-
 	return NULL;
 }
 
@@ -165,10 +166,7 @@ static void do_task(TaskListHandler* hdl)
 		LOGD("do_task %p", task->taskFunc);
 
 		if (task->taskFunc) {
-			task->taskFunc(task->data);
-		}
-		if (task->freeFunc) {
-			task->freeFunc(task->data);
+			task->taskFunc(hdl, task->taskdata);
 		}
 		free(task); // free, since we have done the task
 		task = remove_timeout_task(hdl, timeoutTime);
@@ -194,60 +192,60 @@ static int do_socket(TaskListHandler* hdl, fd_set* rfds)
 }
 
 /*
-	return minum task timeout time, if not found, return 36000
+	return minum task abstime time, if not found, return 36000
 */
 static void min_task_timeout_time(TaskListHandler* hdl, struct timeval* tv)
 {
 	int64_t current = get_current_ms_time();
-	int64_t timeout = 36000 + current;
+	int64_t abstime = 36000 + current;
 	TLTask* task;
 
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
-	pthread_mutex_unlock(&hdl->listLock);
 	if (!task) {
 		tv->tv_sec = 36000;
-		tv->tv_usec = 0;	
+		tv->tv_usec = 0;
+		pthread_mutex_unlock(&hdl->listLock);
 		return;
 	}
-
-	pthread_mutex_lock(&hdl->listLock);
 	while (task) {
-		if (timeout > task->timeout) {
-			timeout = task->timeout;
+		if (abstime > task->abstime) {
+			abstime = task->abstime;
 		}
 		task = task->next;
 	}
 	pthread_mutex_unlock(&hdl->listLock);
 
 	tv->tv_sec = 0;
-	if ((timeout - current) <= 0) {
+	if ((abstime - current) <= 0) {
 		tv->tv_usec = 0;
 	} else {
-		tv->tv_usec = (long) (timeout - current) * 1000;
+		tv->tv_usec = (long) (abstime - current) * 1000;
 	}	
 }
 
-static int dump_task(TLTask* task, void* data)
+static int dump_task(TLTask* task, void* dumpdata)
 {
-	struct TASK_DUMP_ST* dumpst = (struct TASK_DUMP_ST*) data;
+	struct TASK_DUMP_ST* dumpst = (struct TASK_DUMP_ST*) dumpdata;
 	char* str = NULL;
+	struct tm timeinfo;
+	int64_t rawtime = task->abstime / 1000;
+
+	localtime_r(&rawtime, &timeinfo);
 
 	dumpst->count++;
-	LOGI("TASK %d: \n\
-\ttimeout: %ld\n\
-\ttaskFunc: %p\n\
-\tfreeFunc: %p\
-",
-		 dumpst->count,
-		 task->timeout,
-		 task->taskFunc,
-		 task->freeFunc);
+	LOGI("TASK %d: abstime: %ld(%04d-%02d-%02d %02d:%02d:%02d %d), taskFunc: %p",
+			dumpst->count, task->abstime,
+			timeinfo.tm_year+1900, timeinfo.tm_mon+1, timeinfo.tm_mday,
+			timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+			timeinfo.tm_wday,
+			task->taskFunc);
 
 	if (dumpst->dumpFunc) {
-		str = dumpst->dumpFunc(task->data);
+		dumpst->strBuf[sizeof(dumpst->strBuf)-1] = '\0'; // null end of strBuf
+		str = dumpst->dumpFunc(task->taskdata, dumpst->strBuf, sizeof(dumpst->strBuf)-1); // -1 to avoid null end be overwrite
 		if (str) {
-			LOGI("Data in Task: \n\t%s\n", str);
+			LOGI("\tData in Task: %s", str);
 		}
 	}
 
@@ -260,21 +258,11 @@ static void release_all_task(TaskListHandler* hdl)
 
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
-	pthread_mutex_unlock(&hdl->listLock);
-
 	while (task) {
-		pthread_mutex_lock(&hdl->listLock);
 		task2free = task;
 		task = task->next;
-		pthread_mutex_unlock(&hdl->listLock);
-
-		if (task2free->freeFunc) {
-			task2free->freeFunc(task2free->data);
-		}
 		free(task2free);
 	}
-	
-	pthread_mutex_lock(&hdl->listLock);
 	hdl->tasklist = NULL;
 	pthread_mutex_unlock(&hdl->listLock);
 }
@@ -282,27 +270,25 @@ static void release_all_task(TaskListHandler* hdl)
 /*
 	do function for each task in taslist
 */
-static int iterator_task(TaskListHandler* hdl, TLIteratorTaskFunc func, void* data)
+static int iterator_task(TaskListHandler* hdl, TLIteratorTaskFunc itfunc, void* itdata)
 {
 	int ret = 0;
 	TLTask *task;
 
-	if (!func) {
+	if (!itfunc) {
 		return -1;
 	}
 	
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
-	pthread_mutex_unlock(&hdl->listLock);
 	while (task) {
-		ret = func(task, data);
+		ret = itfunc(task, itdata);
 		if (ret == TL_IT_BREAK) {
 			break;
 		}
-		pthread_mutex_lock(&hdl->listLock);
 		task = task->next;
-		pthread_mutex_unlock(&hdl->listLock);
 	}
+	pthread_mutex_unlock(&hdl->listLock);
 	return ret;
 }
 
@@ -423,11 +409,10 @@ int tl_stop_task_loop_thread(TaskListHandler* hdl)
 /*
 	Add a new task to task list
 */
-int tl_add_task(TaskListHandler* hdl,
-			    int64_t timeout, // msec. time to invoke the callback function
-			    TLTaskFunc taskFunc, // timeout callback function
-				TLTaskFunc freeFunc, // function to free data in this task
-			    void* data) // data for func
+int tl_add_task_abstime(TaskListHandler* hdl,
+			    int64_t abstime, // msec. time to invoke the callback function
+			    TLTaskFunc taskFunc, // callback function
+			    void* taskdata) // data for func
 {
 	TLTask *task = (TLTask*) calloc(1, sizeof(TLTask));
 	if (!task) {
@@ -436,15 +421,16 @@ int tl_add_task(TaskListHandler* hdl,
 	}
 
 	// init task
-	task->timeout = timeout + get_current_ms_time();
+	task->abstime = abstime;
 	task->taskFunc = taskFunc;
-	task->freeFunc = freeFunc;
-	task->data = data;
+	task->taskdata = taskdata;
 
 	// add to list
 	pthread_mutex_lock(&hdl->listLock);
 	if (hdl->tasklist) {
 		task->next = hdl->tasklist;
+	} else {
+		task->next = NULL;
 	}
 	hdl->tasklist = task;
 	pthread_mutex_unlock(&hdl->listLock);
@@ -456,33 +442,47 @@ int tl_add_task(TaskListHandler* hdl,
 }
 
 /*
-	Do function, func, for each task in taslist
-	
-	Depend on func() return value, it will do following action after task
-		if func() return 0(TL_IT_CONTINUE), continue task in list
-		if func() return -1(TL_IT_BREAK), break iterator task
-		if func() return 1(TL_IT_REMOVE), remove this task in list
-		if func() return 2(TL_IT_REMOVE_BREAK), remove this task and break
+	Add a new task to task list
 */
-int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc func, void* itdata)
+int tl_add_task(TaskListHandler* hdl,
+			    int64_t timeout, // msec. relative time to invoke the callback function
+			    TLTaskFunc taskFunc, // timeout callback function
+			    void* taskdata) // data for func
+{
+	return tl_add_task_abstime(hdl,
+							   timeout + get_current_ms_time(),
+							   taskFunc,
+							   taskdata);
+}
+
+/*
+	Do function, itfunc, for each task in taslist
+	
+	Depend on itfunc() return value, it will do following action after task
+		if itfunc() return 0(TL_IT_CONTINUE), continue task in list
+		if itfunc() return -1(TL_IT_BREAK), break iterator task
+		if itfunc() return 1(TL_IT_REMOVE), remove this task in list
+		if itfunc() return 2(TL_IT_REMOVE_BREAK), remove this task and break
+*/
+int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc itfunc, void* itdata)
 {
 	int ret = 0;
-	TLTask *task = hdl->tasklist;
+	TLTask *task = NULL;
 	TLTask *lastTask = NULL;
 	TLTask *task2free = NULL;
 
-	if (!func) {
+	if (!itfunc) {
 		return -1;
 	}
 
+	pthread_mutex_lock(&hdl->listLock);
+	task = hdl->tasklist;
 	while (task) {
-		ret = func(task->data, itdata);
-
+		ret = itfunc(hdl, task->taskdata, itdata);
 		if (ret == TL_IT_BREAK) {
 			break;
 		} else if (ret == TL_IT_REMOVE || ret == TL_IT_REMOVE_BREAK) {
 			// remove task from list
-			pthread_mutex_lock(&hdl->listLock);
 			if (hdl->tasklist == task) { // first task
 				hdl->tasklist = task->next;
 			}
@@ -491,12 +491,7 @@ int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc func, void* itdata)
 			}
 			task2free = task;
 			task = task->next;
-			pthread_mutex_unlock(&hdl->listLock);
-
 			// free task
-			if (task2free->freeFunc) {
-				task2free->freeFunc(task2free->data);
-			}
 			free(task2free);
 			
 			// break or not
@@ -507,26 +502,25 @@ int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc func, void* itdata)
 			}
 		} else {
 			// get next task
-			pthread_mutex_lock(&hdl->listLock);
 			lastTask = task;
 			task = task->next;
-			pthread_mutex_unlock(&hdl->listLock);
 		}
 	}
+	pthread_mutex_unlock(&hdl->listLock);
 	return ret;
 }
 
 /*
 	dump all tasks in tasklist
 */
-int tl_dump_tasks(TaskListHandler* hdl, TLTaskFunc func, char* title)
+int tl_dump_tasks(TaskListHandler* hdl, TLDumpFunc dumpFunc, char* title)
 {
 	struct TASK_DUMP_ST dumpst;
 
 	if (title) LOGI("------ %s LIST START ------", title);
 	else LOGI("------ DUMP TASK LIST START ------");
 
-	dumpst.dumpFunc = func;
+	dumpst.dumpFunc = dumpFunc;
 	dumpst.count = 0;
 	iterator_task(hdl, dump_task, &dumpst);
 	
@@ -534,4 +528,74 @@ int tl_dump_tasks(TaskListHandler* hdl, TLTaskFunc func, char* title)
 	else LOGI("------ DUMP TASK LIST END ------");
 
 	return 0;
+}
+
+/*
+	matchdata:
+		the user define data in task
+	if found, return the taskdata of task
+	return NULL while not found
+	
+*/
+void* tl_find_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
+{
+	int ret = 0;
+	TLTask *task;
+
+	if (!matchFunc) {
+		return NULL;
+	}
+	
+	pthread_mutex_lock(&hdl->listLock);
+	task = hdl->tasklist;
+	while (task) {
+		ret = matchFunc(matchdata, task->taskdata);
+		if (ret == TL_IT_MATCH) {
+			pthread_mutex_unlock(&hdl->listLock);
+			return task->taskdata;
+		}
+		task = task->next;
+	}
+	pthread_mutex_unlock(&hdl->listLock);
+	return NULL;
+}
+
+/*
+	matchdata:
+		the user define data in task
+	if found, return the taskdata of task and remove the task
+	return NULL while not found
+*/
+void* tl_find_task_and_remove(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
+{
+	int ret = 0;
+	TLTask *task, *lastTask = NULL;
+	void *retdata = NULL;
+
+	if (!matchFunc) {
+		return NULL;
+	}
+	
+	pthread_mutex_lock(&hdl->listLock);
+	task = hdl->tasklist;
+	while (task) {
+		ret = matchFunc(matchdata, task->taskdata);
+		if (ret == TL_IT_MATCH) {
+			if (hdl->tasklist == task) { // first task
+				hdl->tasklist = task->next;
+			}
+			if (lastTask) {
+				lastTask->next = task->next;
+			}
+			retdata = task->taskdata;
+			free(task); // free task item
+			pthread_mutex_unlock(&hdl->listLock);
+			// return testdata
+			return retdata;
+		}
+		lastTask = task;
+		task = task->next;
+	}
+	pthread_mutex_unlock(&hdl->listLock);
+	return NULL;
 }
