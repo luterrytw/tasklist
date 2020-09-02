@@ -28,6 +28,7 @@ struct timespec {
 #endif
 int gettimeofday(struct timeval *tv, struct timezone *tz);
 int clock_gettime(int X, struct timespec *ts);
+struct tm* localtime_r(const time_t *time, struct tm *tm);
 
 #ifdef __cplusplus
 }

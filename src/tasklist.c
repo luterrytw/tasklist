@@ -1,18 +1,21 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-
 // must before <unistd.h> that will include windows.h
 #include "tasklist.h"
 
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include <math.h>
 #include <pthread.h>
 
+#ifndef WIN32
+#include <sys/ioctl.h>
+#endif
+
 #define LOG_TAG "tl"
 #include "log.h"
-
 
 typedef int (*TLIteratorTaskFunc)(TLTask* task, void* itdata);
 
@@ -28,19 +31,10 @@ struct TASK_DUMP_ST {
 ////////////////////////////////////////////////////////////////////////////////
 static int64_t get_current_ms_time(void)
 {
-    int64_t         ms; // Milliseconds
-    time_t          s;  // Seconds
-    struct timespec spec;
-
-    clock_gettime(CLOCK_REALTIME, &spec);
-
-    s  = spec.tv_sec;
-    ms = (int64_t) round(spec.tv_nsec / 1.0e6); // Convert nanoseconds to milliseconds
-    if (ms > 999) {
-        s++;
-        ms = 0;
-    }
-	return ((int64_t) s) * 1000 + ms;
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	
+	return ((int64_t) tv.tv_sec * 1000) + ((int64_t) tv.tv_usec / 1000);
 }
 
 
@@ -51,6 +45,7 @@ static int init_socket(TaskListHandler* hdl)
 {
 	char port[12];
 	SOCKET pipeAccept = INVALID_SOCKET;
+	int result;
 	
 	// init a local socket to replace pipe() function to compatible with windows
 	snprintf(port, sizeof(port), "%d", hdl->localPipePort);
@@ -71,6 +66,16 @@ static int init_socket(TaskListHandler* hdl)
 	}
 	hdl->pipeRecv = accept(pipeAccept, NULL, 0);
 	SOCKET_NOTVALID_GOTO_ERROR(hdl->pipeRecv, "init_socket: init_client_tcp_socket(pipeRecv) fail");
+	
+	// set non-blocking
+#ifdef WIN32
+	u_long non_blocking = 1;
+	result = ioctlsocket(hdl->pipeRecv, FIONBIO, &non_blocking);
+#else
+	int non_blocking = 1;
+	result = ioctl(hdl->pipeRecv, FIONBIO, &non_blocking);
+#endif
+	SOCKET_NONZERO_GOTO_ERROR(result, "FIONBIO setsockopt() failed");
 
 	if (pipeAccept != INVALID_SOCKET) close(pipeAccept);
 
@@ -117,10 +122,20 @@ static int read_dummy_from_localpipe(TaskListHandler* hdl)
 			LOGE("read_dummy_message fail, invalid socket");
 			return -1;
 	}
-	
+
 	bytes = recv(hdl->pipeRecv, &dummy, 1, 0);
+	// ignore non-blocking no data read error
+#ifdef WIN32
+	if (bytes == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) {
+		bytes = 0;
+	}
+#else
+	if (bytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+		bytes = 0;
+	}
+#endif
 	SOCKET_RESULT_GOTO_ERROR(bytes, "recv(dummy) failed");
-	if(bytes != 1) {
+	if (bytes != 1 && bytes != 0) {
 		LOGE("dummy read fail, errno=%d", errno);
 	}
 
@@ -130,25 +145,48 @@ error:
 	return -1;
 }
 
+/*
+	find and upate minTask
+*/
+static void update_min_task(TaskListHandler* hdl)
+{
+	int64_t current = get_current_ms_time();
+	int64_t abstime = 3600000 + current; // 3600000 ms, 1 hours.
+	TLTask* task = hdl->tasklist;
+
+	hdl->minTask = hdl->tasklist;
+	while (task) {
+		if (abstime > task->abstime) {
+			abstime = task->abstime;
+			hdl->minTask = task;
+		}
+		task = task->next;
+	}
+}
+
 static TLTask* remove_timeout_task(TaskListHandler* hdl, int64_t timeoutTime)
 {
 	TLTask* task;
-	TLTask* prev = NULL;
+	TLTask* lastTask = NULL;
 
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
 	while (task) {
 		if (task->abstime <= timeoutTime) { // timeout
-			if (prev) {
-				prev->next = task->next;
+			if (lastTask) {
+				lastTask->next = task->next;
 			} else {
 				hdl->tasklist = task->next;
 			}
 			task->next = NULL;
+			// check minTask
+			if (hdl->minTask == task) {
+				update_min_task(hdl);
+			}
 			pthread_mutex_unlock(&hdl->listLock);
 			return task;
 		}
-		prev = task;
+		lastTask = task;
 		task = task->next;
 	}
 	pthread_mutex_unlock(&hdl->listLock);
@@ -175,16 +213,18 @@ static void do_task(TaskListHandler* hdl)
 
 static int do_socket(TaskListHandler* hdl, fd_set* rfds)
 {
-	int length = 0;
+	int length = 1;
 
 	if (hdl->pipeRecv != INVALID_SOCKET && FD_ISSET(hdl->pipeRecv, rfds)) { // interrupt, to stop
-		length = read_dummy_from_localpipe(hdl);
+		while (length > 0) {
+			length = read_dummy_from_localpipe(hdl);
+		}
 		return 0; // receive a interrupt event
 	} else { // unknown fd input
 		return 0;
 	}
 
-	if (length <= 0) { // decrypt fail
+	if (length < 0) { // decrypt fail
 		return -1;
 	}
 
@@ -197,31 +237,23 @@ static int do_socket(TaskListHandler* hdl, fd_set* rfds)
 static void min_task_timeout_time(TaskListHandler* hdl, struct timeval* tv)
 {
 	int64_t current = get_current_ms_time();
-	int64_t abstime = 36000 + current;
-	TLTask* task;
+	int64_t abstime = 3600000 + current; // 3600000 ms, 1 hours.
+	int64_t difftime;
 
 	pthread_mutex_lock(&hdl->listLock);
-	task = hdl->tasklist;
-	if (!task) {
-		tv->tv_sec = 36000;
-		tv->tv_usec = 0;
-		pthread_mutex_unlock(&hdl->listLock);
-		return;
+	if (hdl->minTask) {
+		abstime = hdl->minTask->abstime;
 	}
-	while (task) {
-		if (abstime > task->abstime) {
-			abstime = task->abstime;
-		}
-		task = task->next;
-	}
-	pthread_mutex_unlock(&hdl->listLock);
 
-	tv->tv_sec = 0;
-	if ((abstime - current) <= 0) {
+	difftime = abstime - current;
+	if (difftime <= 0) {
+		tv->tv_sec = 0;
 		tv->tv_usec = 0;
 	} else {
-		tv->tv_usec = (long) (abstime - current) * 1000;
-	}	
+		tv->tv_sec = difftime / 1000;
+		tv->tv_usec = (difftime % 1000) * 1000;
+	}
+	pthread_mutex_unlock(&hdl->listLock);
 }
 
 static int dump_task(TLTask* task, void* dumpdata)
@@ -229,13 +261,13 @@ static int dump_task(TLTask* task, void* dumpdata)
 	struct TASK_DUMP_ST* dumpst = (struct TASK_DUMP_ST*) dumpdata;
 	char* str = NULL;
 	struct tm timeinfo;
-	int64_t rawtime = task->abstime / 1000;
+	time_t rawtime = (time_t) task->abstime / 1000;
 
 	localtime_r(&rawtime, &timeinfo);
 
 	dumpst->count++;
-	LOGI("TASK %d: abstime: %ld(%04d-%02d-%02d %02d:%02d:%02d %d), taskFunc: %p",
-			dumpst->count, task->abstime,
+	LOGI("TASK %d(%p): abstime=%" PRId64 "(%04d-%02d-%02d %02d:%02d:%02d %d), taskFunc=%p",
+			dumpst->count, task, task->abstime,
 			timeinfo.tm_year+1900, timeinfo.tm_mon+1, timeinfo.tm_mday,
 			timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
 			timeinfo.tm_wday,
@@ -318,6 +350,8 @@ TaskListHandler* tl_create_handler(int port)
 
 void tl_release_handler(TaskListHandler* hdl)
 {
+	if (!hdl)
+		return;
 	tl_stop_task_loop_thread(hdl);
 	release_all_task(hdl);
 
@@ -330,10 +364,17 @@ void tl_release_handler(TaskListHandler* hdl)
 		hdl->pipeSend = INVALID_SOCKET;
 	}
 	pthread_mutex_destroy(&hdl->listLock);
-
-	if (hdl)
-		free(hdl);
+	free(hdl);
 }
+
+/*
+	Return 1 for empty, else 0
+*/
+int tl_is_empty(TaskListHandler* hdl)
+{
+	return (hdl->tasklist == NULL)? 1: 0;
+}
+
 
 /*
 	the main thread that will handle task in list
@@ -360,7 +401,6 @@ void* tl_task_loop(void *param)
 
 	while (hdl->isRunning) {
 		//LOGD("loop waiting, tv_sec=%ld, tv_usec=%ld..............................", tv.tv_sec, tv.tv_usec);
-
 		ret = select(fdmax+1, &rfds, NULL, NULL, &tv);
 		if (ret == -1) {
 			LOGE("select failed: errno=%d", errno);
@@ -433,6 +473,15 @@ int tl_add_task_abstime(TaskListHandler* hdl,
 		task->next = NULL;
 	}
 	hdl->tasklist = task;
+	
+	// update minTask
+	if (hdl->minTask) {
+		if (task->abstime < hdl->minTask->abstime) {
+			hdl->minTask = task;
+		}
+	} else {
+		hdl->minTask = task;
+	}
 	pthread_mutex_unlock(&hdl->listLock);
 
 	// trigger interrupt to re-calculate timeout time
@@ -450,7 +499,7 @@ int tl_add_task(TaskListHandler* hdl,
 			    void* taskdata) // data for func
 {
 	return tl_add_task_abstime(hdl,
-							   timeout + get_current_ms_time(),
+							   timeout + (time(NULL) * 1000),
 							   taskFunc,
 							   taskdata);
 }
@@ -491,6 +540,10 @@ int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc itfunc, void* itdata)
 			}
 			task2free = task;
 			task = task->next;
+			// check minTask
+			if (hdl->minTask == task2free) {
+				update_min_task(hdl);
+			}
 			// free task
 			free(task2free);
 			
@@ -513,7 +566,7 @@ int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc itfunc, void* itdata)
 /*
 	dump all tasks in tasklist
 */
-int tl_dump_tasks(TaskListHandler* hdl, TLDumpFunc dumpFunc, char* title)
+int tl_dump_tasks(char* title, TaskListHandler* hdl, TLDumpFunc dumpFunc)
 {
 	struct TASK_DUMP_ST dumpst;
 
@@ -549,7 +602,7 @@ void* tl_find_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
 	while (task) {
-		ret = matchFunc(matchdata, task->taskdata);
+		ret = matchFunc(task->taskdata, matchdata);
 		if (ret == TL_IT_MATCH) {
 			pthread_mutex_unlock(&hdl->listLock);
 			return task->taskdata;
@@ -566,7 +619,7 @@ void* tl_find_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
 	if found, return the taskdata of task and remove the task
 	return NULL while not found
 */
-void* tl_find_task_and_remove(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
+void* tl_remove_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
 {
 	int ret = 0;
 	TLTask *task, *lastTask = NULL;
@@ -579,7 +632,7 @@ void* tl_find_task_and_remove(TaskListHandler* hdl, TLMatchFunc matchFunc, void*
 	pthread_mutex_lock(&hdl->listLock);
 	task = hdl->tasklist;
 	while (task) {
-		ret = matchFunc(matchdata, task->taskdata);
+		ret = matchFunc(task->taskdata, matchdata);
 		if (ret == TL_IT_MATCH) {
 			if (hdl->tasklist == task) { // first task
 				hdl->tasklist = task->next;
@@ -588,9 +641,12 @@ void* tl_find_task_and_remove(TaskListHandler* hdl, TLMatchFunc matchFunc, void*
 				lastTask->next = task->next;
 			}
 			retdata = task->taskdata;
+			// check minTask
+			if (hdl->minTask == task) {
+				update_min_task(hdl);
+			}
 			free(task); // free task item
 			pthread_mutex_unlock(&hdl->listLock);
-			// return testdata
 			return retdata;
 		}
 		lastTask = task;

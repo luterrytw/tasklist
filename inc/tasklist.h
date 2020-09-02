@@ -15,7 +15,7 @@ typedef struct {
 	SOCKET pipeSend;
 	pthread_t loopThread;
 	pthread_mutex_t listLock;
-	struct TLTaskST* lastMinTask;
+	struct TLTaskST* minTask;
 	struct TLTaskST* tasklist;
 } TaskListHandler;
 
@@ -64,6 +64,11 @@ TaskListHandler* tl_create_handler(int port);
 void tl_release_handler(TaskListHandler* hdl);
 
 /*
+	Return 1 for empty, else 0
+*/
+int tl_is_empty(TaskListHandler* hdl);
+
+/*
 	create thread that will call tl_task_loop() without block current thread 
 */
 int tl_start_task_loop_thread(TaskListHandler* hdl);
@@ -93,7 +98,7 @@ int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc func, void* itdata);
 /*
 	dump all tasks in tasklist
 */
-int tl_dump_tasks(TaskListHandler* hdl, TLDumpFunc func, char* title);
+int tl_dump_tasks(char* title, TaskListHandler* hdl, TLDumpFunc func);
 
 /*
 	matchdata:
@@ -111,7 +116,7 @@ void* tl_find_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
 	return NULL while not found
 	
 */
-void* tl_find_task_and_remove(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata);
+void* tl_remove_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata);
 
 #ifdef __cplusplus
 }

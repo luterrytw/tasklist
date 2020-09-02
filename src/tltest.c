@@ -116,7 +116,7 @@ int main()
 	data[3].id = 13;
 
 	tl_add_task(hdl,
-			    1000, // msec. time to invoke the callback function
+			    2000, // msec. time to invoke the callback function
 			    print_string, // timeout callback function
 			    &data[0]);
 
@@ -136,29 +136,29 @@ int main()
 			    &data[3]);
 	
 	// dump task
-	tl_dump_tasks(hdl, dump_my_data, "dump task");
+	tl_dump_tasks("dump task", hdl, dump_my_data);
 	
 	// add id+10 and dump tasks
 	tl_iterator_task(hdl, change_data_id, NULL);
-	tl_dump_tasks(hdl, dump_my_data, "add id+10 and dump tasks");
+	tl_dump_tasks("add id+10 and dump tasks", hdl, dump_my_data);
 	
 	// remove specified task id
 	int removeId = 22;
 	LOGI("remove task id>=%d", removeId);
 	tl_iterator_task(hdl, remove_specific_data_id, &removeId);
-	tl_dump_tasks(hdl, dump_my_data, "remove task id by tl_iterator_task()");
+	tl_dump_tasks("remove task id by tl_iterator_task()", hdl, dump_my_data);
 	
 	// try tl_find_tasks
-	fprintf(stderr, "found id == 20\n");
+	LOGI("found id == 22");
 	matchdata.id = 22;
 	founddata = tl_find_task(hdl, match_my_data, &matchdata);
-	fprintf(stderr, "founddata=%p, data=%p, %p, %p, %p\n", founddata, &data[0], &data[1], &data[2], &data[3]);
+	LOGI("founddata=%p, data=%p, %p, %p, %p", founddata, &data[0], &data[1], &data[2], &data[3]);
 	
-	fprintf(stderr, "found & remove id == 20\n");
-	founddata = tl_find_task_and_remove(hdl, match_my_data, &matchdata);
-	fprintf(stderr, "founddata=%p, data=%p, %p, %p, %p\n", founddata, &data[0], &data[1], &data[2], &data[3]);
+	LOGI("found & remove id == 22");
+	founddata = tl_remove_task(hdl, match_my_data, &matchdata);
+	LOGI("founddata=%p, data=%p, %p, %p, %p", founddata, &data[0], &data[1], &data[2], &data[3]);
 	
-	tl_dump_tasks(hdl, dump_my_data, "remove task id by tl_find_task_and_remove()");
+	tl_dump_tasks("remove task id by tl_find_task_and_remove()", hdl, dump_my_data);
 	
 	sleep(4);
 	tl_release_handler(hdl);

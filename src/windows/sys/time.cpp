@@ -84,3 +84,11 @@ int clock_gettime(int X, struct timespec *ts)
 
     return (0);
 }
+
+struct tm* localtime_r(const time_t *time, struct tm *tm)
+{
+	if (localtime_s(tm, time) == 0) {
+		return tm;
+	}
+	return NULL;
+}

@@ -8,3 +8,5 @@ EXPORTS
 	tl_add_task
 	tl_iterator_task
 	tl_dump_tasks
+	tl_find_task
+	tl_remove_task
