@@ -108,7 +108,6 @@ void lu_release_list(LUHandler* hdl)
 	if (!hdl)
 		return;
 	release_all_entry(hdl);
-fprintf(stderr, "ttt 25, hdl=%p\n", hdl);
 	pthread_mutex_destroy(&hdl->listLock);
 	free(hdl);
 }
@@ -168,8 +167,6 @@ int lu_iterator(LUHandler* hdl, LUIteratorFunc itfunc, void* itdata)
 		return -1;
 	}
 
-fprintf(stderr, "ttt 20, hdl=%p\n", hdl);
-fprintf(stderr, "ttt 21, listLock=%p\n", &hdl->listLock);
 	pthread_mutex_lock(&hdl->listLock);
 	entry = hdl->list;
 	while (entry) {

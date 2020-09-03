@@ -116,7 +116,7 @@ int main()
 	data[3].id = 13;
 
 	tl_add_task(hdl,
-			    2000, // msec. time to invoke the callback function
+			    1000, // msec. time to invoke the callback function
 			    print_string, // timeout callback function
 			    &data[0]);
 
