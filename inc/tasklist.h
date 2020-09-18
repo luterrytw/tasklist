@@ -118,6 +118,11 @@ void* tl_find_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata)
 */
 void* tl_remove_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdata);
 
+/*
+	Refresh min task and recaculate the waiting timeout time
+*/
+void tl_refresh_loop(TaskListHandler* hdl);
+
 #ifdef __cplusplus
 }
 #endif

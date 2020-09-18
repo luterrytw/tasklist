@@ -99,7 +99,7 @@ static int send_dummy_to_localpipe(TaskListHandler* hdl)
 	if (hdl->pipeSend == INVALID_SOCKET) {
 		init_socket(hdl);
 		if (hdl->pipeSend == INVALID_SOCKET) {
-			LOGE("send_dummy_message fail, invalid socket");
+			LOGE("send_dummy_to_localpipe fail, invalid socket");
 			return -1;
 		}
 	}
@@ -182,6 +182,7 @@ static TLTask* remove_timeout_task(TaskListHandler* hdl, int64_t timeoutTime)
 			// check minTask
 			if (hdl->minTask == task) {
 				update_min_task(hdl);
+				// doesn't need to notify minTask change, because timeout will re-caculate after do_task()
 			}
 			pthread_mutex_unlock(&hdl->listLock);
 			return task;
@@ -234,7 +235,7 @@ static int do_socket(TaskListHandler* hdl, fd_set* rfds)
 /*
 	return minum task abstime time, if not found, return 36000
 */
-static void min_task_timeout_time(TaskListHandler* hdl, struct timeval* tv)
+static void get_next_timeout_time(TaskListHandler* hdl, struct timeval* tv)
 {
 	int64_t current = get_current_ms_time();
 	int64_t abstime = 3600000 + current; // 3600000 ms, 1 hours.
@@ -400,7 +401,7 @@ void* tl_task_loop(void *param)
 	tv.tv_usec = 0;
 
 	while (hdl->isRunning) {
-		//LOGD("loop waiting, tv_sec=%ld, tv_usec=%ld..............................", tv.tv_sec, tv.tv_usec);
+		LOGI("loop waiting, tv_sec=%ld, tv_usec=%ld..............................", tv.tv_sec, tv.tv_usec);
 		ret = select(fdmax+1, &rfds, NULL, NULL, &tv);
 		if (ret == -1) {
 			LOGE("select failed: errno=%d", errno);
@@ -411,7 +412,7 @@ void* tl_task_loop(void *param)
 			do_socket(hdl, &rfds);
 		}
 
-		min_task_timeout_time(hdl, &tv);
+		get_next_timeout_time(hdl, &tv);
 		rfds = rfdsCopy;
 	}
 
@@ -543,6 +544,7 @@ int tl_iterator_task(TaskListHandler* hdl, TLIteratorFunc itfunc, void* itdata)
 			// check minTask
 			if (hdl->minTask == task2free) {
 				update_min_task(hdl);
+				send_dummy_to_localpipe(hdl); // send dummy to notify timeout change
 			}
 			// free task
 			free(task2free);
@@ -644,6 +646,7 @@ void* tl_remove_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdat
 			// check minTask
 			if (hdl->minTask == task) {
 				update_min_task(hdl);
+				send_dummy_to_localpipe(hdl); // send dummy to notify timeout change
 			}
 			free(task); // free task item
 			pthread_mutex_unlock(&hdl->listLock);
@@ -654,4 +657,13 @@ void* tl_remove_task(TaskListHandler* hdl, TLMatchFunc matchFunc, void* matchdat
 	}
 	pthread_mutex_unlock(&hdl->listLock);
 	return NULL;
+}
+
+/*
+	Refresh min task and recaculate the waiting timeout time
+*/
+void tl_refresh_loop(TaskListHandler* hdl)
+{
+	update_min_task(hdl);
+	send_dummy_to_localpipe(hdl);
 }
