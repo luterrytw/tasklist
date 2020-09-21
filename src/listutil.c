@@ -88,13 +88,15 @@ static int iterator_entry(LUHandler* hdl, LUIteratorEntryFunc itfunc, void* itda
 /*
     return NULL for fail
 */
-LUHandler* lu_create_list()
+LUHandler* lu_create_list(int type)
 {
     LUHandler* hdl = (LUHandler*) malloc(sizeof(LUHandler));
     if (!hdl)
         return NULL;
     memset(hdl, 0, sizeof(LUHandler));
+	hdl->type = type;
     pthread_mutex_init(&hdl->listLock, NULL);
+	pthread_cond_init(&hdl->listCond, NULL);
     return hdl;
 }
 
@@ -110,6 +112,7 @@ void lu_release_list(LUHandler* hdl)
         return;
     release_all_entry(hdl);
     pthread_mutex_destroy(&hdl->listLock);
+	pthread_cond_destroy(&hdl->listCond);
     free(hdl);
 }
 
@@ -148,6 +151,8 @@ int lu_add(LUHandler* hdl, void* entrydata)
 		entry->prev = NULL;
 		entry->next = NULL;
     }
+	if (hdl->type & LU_TYPE_BLOCK)
+		pthread_cond_signal(&hdl->listCond);
     pthread_mutex_unlock(&hdl->listLock);
 
     return 0;
@@ -338,6 +343,8 @@ int lu_push(LUHandler* hdl, void* entrydata)
 		entry->prev = NULL;
 		entry->next = NULL;
     }
+	if (hdl->type & LU_TYPE_BLOCK)
+		pthread_cond_signal(&hdl->listCond);
     pthread_mutex_unlock(&hdl->listLock);
 
     return 0;
@@ -348,8 +355,15 @@ void* lu_pop(LUHandler* hdl)
     LUEntry *entry;
     void *retdata = NULL;
 
+	// add to list
+    pthread_mutex_lock(&hdl->listLock);
     if (hdl->head == NULL) {
-        return NULL;
+		if (hdl->type & LU_TYPE_BLOCK) { // wait for push or queue
+			pthread_cond_wait(&hdl->listCond, &hdl->listLock);
+		} else { // return immediately
+			pthread_mutex_unlock(&hdl->listLock);
+			return NULL;
+		}
     }
 
     entry = hdl->head;
@@ -366,6 +380,8 @@ void* lu_pop(LUHandler* hdl)
 			hdl->tail->next = NULL;
 		}
 	}
+	pthread_mutex_unlock(&hdl->listLock);
+
     free(entry);
     return retdata;
 }

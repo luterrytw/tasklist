@@ -7,7 +7,9 @@
 struct LUEntryST;
 
 typedef struct {
+	int type; // LU_TYPE_xxx
     pthread_mutex_t listLock;
+	pthread_cond_t listCond;
     struct LUEntryST* head;
     struct LUEntryST* tail;
 } LUHandler;
@@ -24,6 +26,14 @@ typedef struct LUEntryST {
 #define LU_IT_BREAK         -1
 #define LU_IT_REMOVE        1
 #define LU_IT_REMOVE_BREAK  2
+
+#define LU_TYPE_NONBLOCK		0
+#define LU_TYPE_BLOCK			1
+#define LU_TYPE_LIST			(1<<1) | LU_TYPE_NONBLOCK
+#define LU_TYPE_NONBLOCK_QUEUE	(2<<1) | LU_TYPE_NONBLOCK
+#define LU_TYPE_BLOCK_QUEUE		(2<<1) | LU_TYPE_BLOCK
+#define LU_TYPE_NONBLOCK_STACK	(3<<1) | LU_TYPE_NONBLOCK
+#define LU_TYPE_BLOCK_STACK		(3<<1) | LU_TYPE_BLOCK
 
 /*
     function definition for iterator each entry in list
@@ -61,7 +71,7 @@ typedef int (*LUMatchFunc)(void* entrydata, void* matchdata);
 extern "C" {
 #endif
 
-LUHandler* lu_create_list();
+LUHandler* lu_create_list(int type);
 
 /*
     NOTE: you must free all entrydata before lu_release_list()

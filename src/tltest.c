@@ -13,6 +13,8 @@ typedef struct TestDataST {
     char str[64];
 } TestData;
 
+TestData testdata[4];
+
 /*
     Function for test tl_add_task()
 */
@@ -135,27 +137,52 @@ static int lucb_remove_all(LUHandler* hdl, void* data, void* itdata)
     return LU_IT_REMOVE;
 }
 
+void* thread_unlock_pop_block(void* args)
+{
+	LUHandler* stack = (LUHandler*) args;
+	
+	LOGI("thread_unlock_pop_block enter, wait for 3sec...");
+	sleep(3);
+	LOGI("thread_unlock_pop_block, push data id=22");
+	lu_push(stack, &testdata[2]);
+	
+	return NULL;
+}
+
+void* thread_unlock_dequeue_block(void* args)
+{
+	LUHandler* queue = (LUHandler*) args;
+	
+	LOGI("thread_unlock_dequeue_block enter, wait for 3sec...");
+	sleep(3);
+	LOGI("thread_unlock_dequeue_block, enqueue data id=20");
+	lu_enqueue(queue, &testdata[0]);
+	
+	return NULL;
+}
+
+/*
 int main()
 {
-    TestData data[4];
     TestData matchdata;
     TestData* founddata;
-    LUHandler* list = lu_create_list();
+	pthread_t thread_hdl;
+    LUHandler* list = lu_create_list(LU_TYPE_BLOCK);
 
-    memset(data, 0, sizeof(data));
-    data[0].id = 10;
-    data[1].id = 11;
-    data[2].id = 12;
-    data[3].id = 13;
+    memset(testdata, 0, sizeof(testdata));
+    testdata[0].id = 10;
+    testdata[1].id = 11;
+    testdata[2].id = 12;
+    testdata[3].id = 13;
 
     //////////////////////////////////////////////////////////////
     // Try List
     //////////////////////////////////////////////////////////////
     LOGI("------------- Try List -----------");
-    lu_add(list, &data[0]);
-    lu_add(list, &data[1]);
-    lu_add(list, &data[2]);
-    lu_add(list, &data[3]);
+    lu_add(list, &testdata[0]);
+    lu_add(list, &testdata[1]);
+    lu_add(list, &testdata[2]);
+    lu_add(list, &testdata[3]);
 
     lu_dump_list("init list", list, dump_my_data);
 
@@ -172,7 +199,7 @@ int main()
     LOGI("found id == 22");
     matchdata.id = 22;
     founddata = lu_find(list, lucb_match_my_data, &matchdata);
-    LOGI("founddata=%p, data=%p, %p, %p, %p", founddata, &data[0], &data[1], &data[2], &data[3]);
+    LOGI("founddata=%p, data=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
     // try lu_remove
     matchdata.id = 20;
@@ -186,7 +213,7 @@ int main()
     LOGI("------------- Try Queue -----------");
     // try lu_enqueue
     LOGI("run lu_enqueue(id=20)");
-    lu_enqueue(list, &data[0]);
+    lu_enqueue(list, &testdata[0]);
     lu_dump_list("after lu_enqueue()", list, dump_my_data);
 
     // try lu_dequeue
@@ -198,14 +225,24 @@ int main()
     }
 
     //////////////////////////////////////////////////////////////
+    // Try Queue Block
+    //////////////////////////////////////////////////////////////
+	LOGI("------------- Try Queue Block -----------");
+	lu_dequeue(list);
+	lu_dequeue(list);
+	pthread_create(&thread_hdl, NULL, thread_unlock_dequeue_block, list);
+	founddata = lu_dequeue(list);
+    if (founddata) {
+        LOGI("lu_dequeue(), founddata.id=%d", founddata->id);
+        lu_dump_list("try queue block", list, dump_my_data);
+    }
+
+    //////////////////////////////////////////////////////////////
     // Try Stack
     //////////////////////////////////////////////////////////////
     LOGI("------------- Try Stack -----------");
-    lu_push(list, &data[1]);
+    lu_push(list, &testdata[1]);
     lu_dump_list("after lu_push(21)", list, dump_my_data);
-
-    lu_push(list, &data[2]);
-    lu_dump_list("after lu_push(22)", list, dump_my_data);
 
     LOGI("run lu_pop()");
     founddata = lu_pop(list);
@@ -215,6 +252,18 @@ int main()
     }
 
     //////////////////////////////////////////////////////////////
+    // Try Stack Block
+    //////////////////////////////////////////////////////////////
+	LOGI("------------- Try Stack Block -----------");
+	pthread_create(&thread_hdl, NULL, thread_unlock_pop_block, list);
+	founddata = lu_pop(list);
+    if (founddata) {
+        LOGI("lu_pop(), founddata.id=%d", founddata->id);
+        lu_dump_list("try Block 3", list, dump_my_data);
+    }
+	
+	
+    //////////////////////////////////////////////////////////////
     // Try Release
     //////////////////////////////////////////////////////////////
     LOGI("remove all by lu_iterator()");
@@ -223,41 +272,41 @@ int main()
 
     lu_release_list(list);
 }
+*/
 
-/*
 int main()
 {
-    TestData data[4];
+    TestData testdata[4];
     TestData matchdata;
     TestData* founddata;
     TaskListHandler* hdl = tl_create_handler(19966);
     tl_start_task_loop_thread(hdl);
 
-    memset(data, 0, sizeof(data));
-    data[0].id = 10;
-    data[1].id = 11;
-    data[2].id = 12;
-    data[3].id = 13;
+    memset(testdata, 0, sizeof(testdata));
+    testdata[0].id = 10;
+    testdata[1].id = 11;
+    testdata[2].id = 12;
+    testdata[3].id = 13;
 
     tl_add_task(hdl,
                 2000, // msec. time to invoke the callback function
                 print_string, // timeout callback function
-                &data[0]);
+                &testdata[0]);
 
     tl_add_task(hdl,
                 3000, // msec. time to invoke the callback function
                 print_string, // timeout callback function
-                &data[1]);
+                &testdata[1]);
 
     tl_add_task(hdl,
                 4000, // msec. time to invoke the callback function
                 print_string, // timeout callback function
-                &data[2]);
+                &testdata[2]);
 
     tl_add_task(hdl,
                 5000, // msec. time to invoke the callback function
                 print_string, // timeout callback function
-                &data[3]);
+                &testdata[3]);
 
     // dump task
     tl_dump_tasks("dump task", hdl, dump_my_data);
@@ -276,12 +325,12 @@ int main()
     LOGI("found id == 21");
     matchdata.id = 21;
     founddata = tl_find_task(hdl, match_my_data, &matchdata);
-    LOGI("founddata=%p, data=%p, %p, %p, %p", founddata, &data[0], &data[1], &data[2], &data[3]);
+    LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
     LOGI("found & remove id == 20");
     matchdata.id = 21;
     founddata = tl_remove_task(hdl, match_my_data, &matchdata);
-    LOGI("founddata=%p, data=%p, %p, %p, %p", founddata, &data[0], &data[1], &data[2], &data[3]);
+    LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
     tl_dump_tasks("remove task id by tl_remove_task()", hdl, dump_my_data);
 
@@ -292,4 +341,4 @@ int main()
 
     return 0;
 }
-*/
+
