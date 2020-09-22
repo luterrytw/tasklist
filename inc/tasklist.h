@@ -1,20 +1,17 @@
 #ifndef __TASK_LIST_H__
 #define __TASK_LIST_H__
 
-#include "tcp-socket.h"
-
 #include <stdint.h>
+#include <string.h>
 #include <pthread.h>
 
 struct TLTaskST;
 
 typedef struct {
 	int isRunning;
-	int localPipePort; // port of pipeRecv socket
-	SOCKET pipeRecv;
-	SOCKET pipeSend;
 	pthread_t loopThread;
 	pthread_mutex_t listLock;
+	pthread_cond_t listCond;
 	struct TLTaskST* minTask;
 	struct TLTaskST* tasklist;
 } TaskListHandler;
@@ -60,7 +57,7 @@ typedef int (*TLMatchFunc)(void* matchdata, void* taskdata);
 extern "C" {
 #endif
 
-TaskListHandler* tl_create_handler(int port);
+TaskListHandler* tl_create_handler();
 void tl_release_handler(TaskListHandler* hdl);
 
 /*
