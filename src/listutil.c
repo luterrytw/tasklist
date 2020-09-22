@@ -111,6 +111,20 @@ void lu_release_list(LUHandler* hdl)
     if (!hdl)
         return;
     release_all_entry(hdl);
+	
+	pthread_mutex_lock(&hdl->listLock);
+	if (hdl->type & LU_TYPE_BLOCK) {
+		hdl->leaveFlag = 1;
+		pthread_cond_signal(&hdl->listCond);
+	}
+	pthread_mutex_unlock(&hdl->listLock);
+	
+	usleep(100000); // waiting thread(lu_pop) end
+	
+	// lock again to confirm all waiting thread(lu_pop) is end
+	pthread_mutex_lock(&hdl->listLock);
+	pthread_mutex_unlock(&hdl->listLock);
+	// destory mutex & cond
     pthread_mutex_destroy(&hdl->listLock);
 	pthread_cond_destroy(&hdl->listCond);
     free(hdl);
@@ -352,36 +366,43 @@ int lu_push(LUHandler* hdl, void* entrydata)
 
 void* lu_pop(LUHandler* hdl)
 {
-    LUEntry *entry;
+    LUEntry *entry = NULL;
     void *retdata = NULL;
 
 	// add to list
     pthread_mutex_lock(&hdl->listLock);
-    if (hdl->head == NULL) {
-		if (hdl->type & LU_TYPE_BLOCK) { // wait for push or queue
-			pthread_cond_wait(&hdl->listCond, &hdl->listLock);
-		} else { // return immediately
-			pthread_mutex_unlock(&hdl->listLock);
-			return NULL;
+	do {
+		if (hdl->head == NULL) {
+			if (hdl->type & LU_TYPE_BLOCK) { // wait for push or queue
+				pthread_cond_wait(&hdl->listCond, &hdl->listLock);
+			} else { // return immediately
+				break;
+			}
 		}
-    }
+		if (hdl->leaveFlag == 1) {
+			break;
+		}
 
-    entry = hdl->head;
-    retdata = entry->data;
-	// modify head
-    hdl->head = hdl->head->next;
-	if (hdl->head) {
-		hdl->head->prev = NULL;
-	}
-	// modify tail
-	if (hdl->tail == entry) { // tail entry
-		hdl->tail = entry->prev;
-		if (hdl->tail) {
-			hdl->tail->next = NULL;
+		entry = hdl->head;
+		retdata = entry->data;
+		// modify head
+		hdl->head = hdl->head->next;
+		if (hdl->head) {
+			hdl->head->prev = NULL;
+		}
+		// modify tail
+		if (hdl->tail == entry) { // tail entry
+			hdl->tail = entry->prev;
+			if (hdl->tail) {
+				hdl->tail->next = NULL;
+			}
 		}
 	}
+	while (0);
 	pthread_mutex_unlock(&hdl->listLock);
 
-    free(entry);
+	if (entry) {
+		free(entry);
+	}
     return retdata;
 }

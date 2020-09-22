@@ -39,7 +39,7 @@ static void* print_string(TaskListHandler* hdl, void *data)
         the user defined data pass by tl_add_task()
     return TL_IT_CONTINUE for continue
 */
-static int change_data_id(TaskListHandler* hdl, void* data, void* itdata)
+static int tlcb_change_data_id(TaskListHandler* hdl, void* data, void* itdata)
 {
     TestData* testdata = (TestData*) data;
     testdata->id += 10;
@@ -64,7 +64,7 @@ static int lucb_change_data_id(LUHandler* hdl, void* data, void* itdata)
     return TL_IT_REMOVE for removing
     return TL_IT_REMOVE_BREAK for removing task and break
 */
-static int remove_specific_data_id(TaskListHandler* hdl, void* data, void* itdata)
+static int tlcb_remove_specific_data_id(TaskListHandler* hdl, void* data, void* itdata)
 {
     TestData* testdata = (TestData*) data;
     int* id = (int*) itdata;
@@ -110,7 +110,7 @@ static char* dump_my_data(void* data, char* strBuf, int strBufLen)
     teskdata:
         the testdata of each task in list
 */
-static int match_my_data(void* matchdata, void* teskdata)
+static int tlcb_match_my_data(void* matchdata, void* teskdata)
 {
     TestData* data1 = (TestData*) matchdata;
     TestData* data2 = (TestData*) teskdata;
@@ -141,11 +141,21 @@ void* thread_unlock_pop_block(void* args)
 {
 	LUHandler* stack = (LUHandler*) args;
 	
-	LOGI("thread_unlock_pop_block enter, wait for 3sec...");
-	sleep(3);
+	LOGI("thread_unlock_pop_block enter, wait for 2sec...");
+	sleep(2);
 	LOGI("thread_unlock_pop_block, push data id=22");
 	lu_push(stack, &testdata[2]);
 	
+	return NULL;
+}
+
+void* thread_pop_block(void* args)
+{
+	LUHandler* stack = (LUHandler*) args;
+	
+	LOGI("thread_pop_block enter, block here...");
+	lu_pop(stack);
+	LOGI("thread_pop_block exit");
 	return NULL;
 }
 
@@ -153,8 +163,8 @@ void* thread_unlock_dequeue_block(void* args)
 {
 	LUHandler* queue = (LUHandler*) args;
 	
-	LOGI("thread_unlock_dequeue_block enter, wait for 3sec...");
-	sleep(3);
+	LOGI("thread_unlock_dequeue_block enter, wait for 2sec...");
+	sleep(2);
 	LOGI("thread_unlock_dequeue_block, enqueue data id=20");
 	lu_enqueue(queue, &testdata[0]);
 	
@@ -262,9 +272,8 @@ int main()
 	founddata = lu_pop(list);
     if (founddata) {
         LOGI("lu_pop(), founddata.id=%d", founddata->id);
-        lu_dump_list("try Block 3", list, dump_my_data);
+        lu_dump_list("try Block", list, dump_my_data);
     }
-	
 	
     //////////////////////////////////////////////////////////////
     // Try Release
@@ -274,7 +283,13 @@ int main()
     lu_iterator(list, lucb_remove_all, NULL);
     lu_dump_list("remove all lu_iterator()", list, dump_my_data);
 
+	LOGI("create thread that block at lu_pop()...");
+	pthread_create(&thread_hdl, NULL, thread_pop_block, list);
+	LOGI("release list after 2sec.");
+	sleep(2);
+
     lu_release_list(list);
+	LOGI("MAIN END");
 }
 
 /*
@@ -316,24 +331,24 @@ int main()
     tl_dump_tasks("dump task", hdl, dump_my_data);
 
     // add id+10 and dump tasks
-    tl_iterator_task(hdl, change_data_id, NULL);
+    tl_iterator_task(hdl, tlcb_change_data_id, NULL);
     tl_dump_tasks("add id+10 and dump tasks", hdl, dump_my_data);
 
     // remove specified task id
     int removeId = 20;
     LOGI("remove task id==%d", removeId);
-    tl_iterator_task(hdl, remove_specific_data_id, &removeId);
+    tl_iterator_task(hdl, tlcb_remove_specific_data_id, &removeId);
     tl_dump_tasks("remove task id by tl_iterator_task()", hdl, dump_my_data);
 
     // try tl_find_tasks
     LOGI("found id == 21");
     matchdata.id = 21;
-    founddata = tl_find_task(hdl, match_my_data, &matchdata);
+    founddata = tl_find_task(hdl, tlcb_match_my_data, &matchdata);
     LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
     LOGI("found & remove id == 20");
     matchdata.id = 21;
-    founddata = tl_remove_task(hdl, match_my_data, &matchdata);
+    founddata = tl_remove_task(hdl, tlcb_match_my_data, &matchdata);
     LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
     tl_dump_tasks("remove task id by tl_remove_task()", hdl, dump_my_data);

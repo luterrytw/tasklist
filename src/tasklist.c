@@ -1,6 +1,3 @@
-// must before <unistd.h> that will include windows.h
-#include "tasklist.h"
-
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +13,8 @@
 
 #define LOG_TAG "tl"
 #include "log.h"
+
+#include "tasklist.h"
 
 typedef int (*TLIteratorTaskFunc)(TLTask* task, void* itdata);
 

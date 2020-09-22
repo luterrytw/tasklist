@@ -10,6 +10,7 @@ typedef struct {
 	int type; // LU_TYPE_xxx
     pthread_mutex_t listLock;
 	pthread_cond_t listCond;
+	int leaveFlag;
     struct LUEntryST* head;
     struct LUEntryST* tail;
 } LUHandler;
