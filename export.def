@@ -10,3 +10,13 @@ EXPORTS
 	tl_dump_tasks
 	tl_find_task
 	tl_remove_task
+	lu_create_list
+	lu_release_list
+	lu_is_empty
+	lu_add
+	lu_iterator
+	lu_dump_list
+	lu_find
+	lu_remove
+	lu_push
+	lu_pop

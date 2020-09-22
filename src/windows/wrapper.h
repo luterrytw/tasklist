@@ -1,10 +1,3 @@
-/****************************************************************************/
-/* Copyright(C) : Advantech Technologies, Inc.								*/
-/* Create Date  : 2015/08/18 by Fred Chang									*/
-/* Modified Date: 2015/08/18 by Fred Chang									*/
-/* Abstract     :  					*/
-/* Reference    : None														*/
-/****************************************************************************/
 #ifndef __wrapper_h__
 #define __wrapper_h__
 

@@ -117,7 +117,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 	gettimeofday(&tv, NULL);
 
 	if (abstime)
-		timeout_ms = (unsigned long)(((abstime->tv_sec - tv.tv_sec) * 1000 + (abstime->tv_nsec - tv.tv_usec / 1000) / 1000000) > 0 ? ((abstime->tv_sec - tv.tv_sec) * 1000 + (abstime->tv_nsec - tv.tv_usec / 1000) / 1000000) : 0);
+		timeout_ms = (unsigned long)(((abstime->tv_sec - tv.tv_sec) * 1000 + (abstime->tv_nsec / 1000 - tv.tv_usec) / 1000) > 0 ? ((abstime->tv_sec - tv.tv_sec) * 1000 + (abstime->tv_nsec / 1000 - tv.tv_usec) / 1000) : 0);
 
 	EnterCriticalSection(&cond->waiters_count_lock);
 	cond->waiters_count++;
@@ -146,10 +146,14 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 				wake = 1;
 			}
 		}
-		else if (res != WAIT_OBJECT_0)
+		else if (res == WAIT_TIMEOUT) {
+			cond->waiters_count--;
+			rv = ETIMEDOUT;
+			break;
+		} else if (res != WAIT_OBJECT_0)
 		{
 			cond->waiters_count--;
-			rv = 1;
+			rv = EINVAL;
 			break;
 		}
 
@@ -165,6 +169,12 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 	LeaveCriticalSection(&cond->waiters_count_lock);
 	pthread_mutex_lock(mutex);
 	return rv;
+}
+
+
+int pthread_cond_wait(pthread_cond_t* cond, pthread_mutex_t* mutex)
+{
+	return pthread_cond_timedwait(cond, mutex, NULL);
 }
 
 int pthread_cond_destroy(pthread_cond_t *cond)

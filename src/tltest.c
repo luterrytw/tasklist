@@ -161,7 +161,6 @@ void* thread_unlock_dequeue_block(void* args)
 	return NULL;
 }
 
-/*
 int main()
 {
     TestData matchdata;
@@ -178,7 +177,7 @@ int main()
     //////////////////////////////////////////////////////////////
     // Try List
     //////////////////////////////////////////////////////////////
-    LOGI("------------- Try List -----------");
+    LOGI("\n########## Try List ##########");
     lu_add(list, &testdata[0]);
     lu_add(list, &testdata[1]);
     lu_add(list, &testdata[2]);
@@ -210,7 +209,7 @@ int main()
     //////////////////////////////////////////////////////////////
     // Try Queue
     //////////////////////////////////////////////////////////////
-    LOGI("------------- Try Queue -----------");
+    LOGI("\n########## Try Queue ##########");
     // try lu_enqueue
     LOGI("run lu_enqueue(id=20)");
     lu_enqueue(list, &testdata[0]);
@@ -227,9 +226,10 @@ int main()
     //////////////////////////////////////////////////////////////
     // Try Queue Block
     //////////////////////////////////////////////////////////////
-	LOGI("------------- Try Queue Block -----------");
-	lu_dequeue(list);
-	lu_dequeue(list);
+	LOGI("\n########## Try Queue Block ##########");
+    LOGI("remove all by lu_iterator()");
+    lu_iterator(list, lucb_remove_all, NULL);
+    lu_dump_list("remove all lu_iterator()", list, dump_my_data);
 	pthread_create(&thread_hdl, NULL, thread_unlock_dequeue_block, list);
 	founddata = lu_dequeue(list);
     if (founddata) {
@@ -240,7 +240,7 @@ int main()
     //////////////////////////////////////////////////////////////
     // Try Stack
     //////////////////////////////////////////////////////////////
-    LOGI("------------- Try Stack -----------");
+    LOGI("\n########## Try Stack ##########");
     lu_push(list, &testdata[1]);
     lu_dump_list("after lu_push(21)", list, dump_my_data);
 
@@ -254,7 +254,10 @@ int main()
     //////////////////////////////////////////////////////////////
     // Try Stack Block
     //////////////////////////////////////////////////////////////
-	LOGI("------------- Try Stack Block -----------");
+	LOGI("\n########## Try Stack Block ##########");
+    LOGI("remove all by lu_iterator()");
+    lu_iterator(list, lucb_remove_all, NULL);
+    lu_dump_list("remove all lu_iterator()", list, dump_my_data);
 	pthread_create(&thread_hdl, NULL, thread_unlock_pop_block, list);
 	founddata = lu_pop(list);
     if (founddata) {
@@ -266,14 +269,15 @@ int main()
     //////////////////////////////////////////////////////////////
     // Try Release
     //////////////////////////////////////////////////////////////
+	LOGI("\n########## Try Release ##########");
     LOGI("remove all by lu_iterator()");
     lu_iterator(list, lucb_remove_all, NULL);
     lu_dump_list("remove all lu_iterator()", list, dump_my_data);
 
     lu_release_list(list);
 }
-*/
 
+/*
 int main()
 {
     TestData testdata[4];
@@ -341,4 +345,4 @@ int main()
 
     return 0;
 }
-
+*/

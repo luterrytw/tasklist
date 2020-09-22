@@ -111,12 +111,14 @@ static void do_task(TaskListHandler* hdl)
 static void get_next_timeout_time(TaskListHandler* hdl, struct timespec* ts)
 {
 	int64_t current = get_current_ms_time();
-	int64_t abstime = 3600000 + current; // 3600000 ms, 1 hours.
+	int64_t abstime;
 
-	if (hdl->minTask) {
-		abstime = hdl->minTask->abstime;
+	ts->tv_sec = 9999999999; // 2286 year
+	ts->tv_nsec = 0;
+	if (!hdl->minTask) {
+		return;
 	}
-
+	abstime = hdl->minTask->abstime;
 	if (abstime <= current) {
 		ts->tv_sec = 0;
 		ts->tv_nsec = 0;
