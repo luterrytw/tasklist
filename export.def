@@ -20,3 +20,4 @@ EXPORTS
 	lu_remove
 	lu_push
 	lu_pop
+	lu_clear

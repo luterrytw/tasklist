@@ -9,6 +9,9 @@ struct LUEntryST;
 typedef struct {
 	int type; // LU_TYPE_xxx
     pthread_mutex_t listLock;
+	// waiting condition for lu_pop() in LU_TYPE_NONBLOCK_STACK
+	// waiting condition for lu_dequeue() in LU_TYPE_BLOCK_QUEUE
+	// waiting condition for lu_wait_notify() in LU_TYPE_LIST
 	pthread_cond_t listCond;
 	int leaveFlag;
     struct LUEntryST* head;
@@ -141,6 +144,21 @@ void* lu_pop(LUHandler* hdl);
    Remove data from list->head for FIFO
 */
 #define lu_dequeue lu_pop
+
+/*
+   clear list without free content
+*/
+void lu_clear(LUHandler* hdl);
+
+/*
+	notify about list change
+*/
+void lu_notify(LUHandler* hdl);
+
+/*
+	block and wait notify event
+*/
+void lu_wait_notify(LUHandler* hdl);
 
 #ifdef __cplusplus
 }

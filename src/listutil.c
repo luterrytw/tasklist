@@ -27,7 +27,7 @@ static int dump_entry(LUEntry* entry, void* dumpdata)
     LuEntryDumpST* dumpst = (LuEntryDumpST*) dumpdata;
     char* str = NULL;
     dumpst->count++;
-    
+
     if (dumpst->dumpFunc) {
         dumpst->strBuf[sizeof(dumpst->strBuf)-1] = '\0'; // null end of strBuf
         str = dumpst->dumpFunc(entry->data, dumpst->strBuf, sizeof(dumpst->strBuf)-1); // -1 to avoid null end be overwrite
@@ -68,7 +68,7 @@ static int iterator_entry(LUHandler* hdl, LUIteratorEntryFunc itfunc, void* itda
     if (!itfunc) {
         return -1;
     }
-    
+
     pthread_mutex_lock(&hdl->listLock);
     entry = hdl->head;
     while (entry) {
@@ -139,7 +139,7 @@ int lu_is_empty(LUHandler* hdl)
 }
 
 /*
-    Add a new entrydata to entry list
+    Add data to list->tail for FIFO
 */
 int lu_add(LUHandler* hdl, void* entrydata)
 {
@@ -333,6 +333,9 @@ void* lu_remove(LUHandler* hdl, LUMatchFunc matchFunc, void* matchdata)
     return retdata;
 }
 
+/*
+   push data to list->head for FILO
+*/
 int lu_push(LUHandler* hdl, void* entrydata)
 {
     LUEntry *entry = (LUEntry*) calloc(1, sizeof(LUEntry));
@@ -379,7 +382,7 @@ void* lu_pop(LUHandler* hdl)
 				break;
 			}
 		}
-		if (hdl->leaveFlag == 1) {
+		if (hdl->leaveFlag == 1 || hdl->head == NULL) {
 			break;
 		}
 
@@ -405,4 +408,33 @@ void* lu_pop(LUHandler* hdl)
 		free(entry);
 	}
     return retdata;
+}
+
+void lu_clear(LUHandler* hdl)
+{
+	LUEntry *entry = NULL;
+	LUEntry *entry2free = NULL;
+	
+	pthread_mutex_lock(&hdl->listLock);
+	entry = hdl->head;
+	while (entry) {
+		entry2free = entry;
+		entry = entry->next;
+		free(entry2free);
+	}
+	pthread_mutex_unlock(&hdl->listLock);
+}
+
+void lu_notify(LUHandler* hdl)
+{
+	pthread_mutex_lock(&hdl->listLock);
+	pthread_cond_signal(&hdl->listCond);
+	pthread_mutex_unlock(&hdl->listLock);
+}
+
+void lu_wait_notify(LUHandler* hdl)
+{
+	pthread_mutex_lock(&hdl->listLock);
+	pthread_cond_wait(&hdl->listCond, &hdl->listLock);
+	pthread_mutex_unlock(&hdl->listLock);	
 }
