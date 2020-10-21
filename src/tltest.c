@@ -16,21 +16,6 @@ typedef struct TestDataST {
 TestData testdata[4];
 
 /*
-    Function for test tl_add_task()
-*/
-static void* print_string(TaskListHandler* hdl, void *data)
-{
-    TestData* testdata = (TestData*) data;
-
-    LOGI("print_string, string id=%d", testdata->id);
-    snprintf(testdata->str, sizeof(testdata->str), "my task string addr is %p", testdata->str);
-
-    LOGI("allocat_string, id=%d, str=[%s]", testdata->id, testdata->str);
-
-    return NULL;
-}
-
-/*
     Function for test tl_iterator_task()
 
     Type: TLIteratorFunc
@@ -171,6 +156,36 @@ void* thread_unlock_dequeue_block(void* args)
 	return NULL;
 }
 
+/*
+    Function for test tl_add_task()
+*/
+static void* task_print_string(TaskListHandler* hdl, void *data)
+{
+    TestData* testdata = (TestData*) data;
+
+    LOGI("task_print_string, string id=%d", testdata->id);
+    snprintf(testdata->str, sizeof(testdata->str), "my task string addr is %p", testdata->str);
+
+    LOGI("allocat_string, id=%d, str=[%s]", testdata->id, testdata->str);
+
+    return NULL;
+}
+
+static void* task_find(TaskListHandler* hdl, void *data)
+{
+	TestData matchdata;
+	TestData* founddata;
+	
+    LOGI("task_find, found & remove id == 21");
+	memset(&matchdata, 0, sizeof(matchdata));
+    matchdata.id = 21;
+    founddata = tl_remove_task(hdl, tlcb_match_my_data, &matchdata);
+    LOGI("task_find, founddata=%p", founddata);
+	
+	return NULL;
+}
+
+/*
 int main()
 {
     TestData matchdata;
@@ -291,11 +306,11 @@ int main()
     lu_release_list(list);
 	LOGI("MAIN END");
 }
+*/
 
-/*
 int main()
 {
-    TestData testdata[4];
+    TestData testdata[5];
     TestData matchdata;
     TestData* founddata;
     TaskListHandler* hdl = tl_create_handler(19966);
@@ -309,22 +324,22 @@ int main()
 
     tl_add_task(hdl,
                 2000, // msec. time to invoke the callback function
-                print_string, // timeout callback function
+                task_print_string, // timeout callback function
                 &testdata[0]);
 
     tl_add_task(hdl,
                 3000, // msec. time to invoke the callback function
-                print_string, // timeout callback function
+                task_print_string, // timeout callback function
                 &testdata[1]);
 
     tl_add_task(hdl,
-                4000, // msec. time to invoke the callback function
-                print_string, // timeout callback function
+                1000, // msec. time to invoke the callback function
+                task_find, // timeout callback function
                 &testdata[2]);
 
     tl_add_task(hdl,
                 5000, // msec. time to invoke the callback function
-                print_string, // timeout callback function
+                task_print_string, // timeout callback function
                 &testdata[3]);
 
     // dump task
@@ -346,10 +361,10 @@ int main()
     founddata = tl_find_task(hdl, tlcb_match_my_data, &matchdata);
     LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
-    LOGI("found & remove id == 20");
-    matchdata.id = 21;
-    founddata = tl_remove_task(hdl, tlcb_match_my_data, &matchdata);
-    LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
+    //LOGI("found & remove id == 20");
+    //matchdata.id = 21;
+    //founddata = tl_remove_task(hdl, tlcb_match_my_data, &matchdata);
+    //LOGI("founddata=%p, testdata=%p, %p, %p, %p", founddata, &testdata[0], &testdata[1], &testdata[2], &testdata[3]);
 
     tl_dump_tasks("remove task id by tl_remove_task()", hdl, dump_my_data);
 
@@ -360,4 +375,3 @@ int main()
 
     return 0;
 }
-*/

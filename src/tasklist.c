@@ -94,12 +94,15 @@ static void do_task(TaskListHandler* hdl)
 	task = remove_timeout_task(hdl, timeoutTime);
 
 	while (task) {
+		pthread_mutex_unlock(&hdl->listLock); // unlock, so do_task can call tl_xxx function
 		LOGD("do_task %p", task->taskFunc);
 
 		if (task->taskFunc) {
 			task->taskFunc(hdl, task->taskdata);
 		}
 		free(task); // free, since we have done the task
+		
+		pthread_mutex_lock(&hdl->listLock); // lock again, because 
 		task = remove_timeout_task(hdl, timeoutTime);
 	}
 }
@@ -248,7 +251,7 @@ void* tl_task_loop(void *param)
 	while (hdl->isRunning) {
 		pthread_mutex_lock(&hdl->listLock);
 		get_next_timeout_time(hdl, &ts);
-		LOGI("loop waiting, tv_sec=%ld, tv_nsec=%ld..............................", ts.tv_sec, ts.tv_nsec);
+		//LOGI("loop waiting, tv_sec=%ld, tv_nsec=%ld..............................", ts.tv_sec, ts.tv_nsec);
 		ret = pthread_cond_timedwait(&hdl->listCond, &hdl->listLock, &ts);
 		if (ret == ETIMEDOUT) {
 			do_task(hdl);
